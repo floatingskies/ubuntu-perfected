@@ -25,6 +25,30 @@ apt-get upgrade -y \
 
 echo "::endgroup::"
 
+echo "::group:: Prepare initramfs and bootloader tooling"
+
+# The desktop stack pulls initramfs-tools (via kdump-tools) and the grub
+# packages, and configuring a kernel runs their hooks (mkinitramfs for the
+# kdump initrd, update-grub for grub.cfg). Inside a build container those fail:
+#   mkinitramfs: failed to determine device for /
+#   dpkg: error processing package linux-image-... postinst ... exit status 1
+# Extract the pieces that only FAIL interactively: install the tool-owning
+# packages now, while no kernel/modules exist (their postinsts have nothing to
+# regenerate), then stub the binaries out for the rest of the build. The real
+# bootc initramfs is generated later with dracut (initramfs.sh), and the real
+# tools are restored once the desktop install is done.
+apt-get install -y initramfs-tools grub-common grub2-common
+
+mv /usr/sbin/mkinitramfs /usr/sbin/mkinitramfs.real
+printf '#!/bin/sh\nexit 0\n' > /usr/sbin/mkinitramfs
+chmod +x /usr/sbin/mkinitramfs
+
+mv /usr/sbin/update-grub /usr/sbin/update-grub.real
+printf '#!/bin/sh\nexit 0\n' > /usr/sbin/update-grub
+chmod +x /usr/sbin/update-grub
+
+echo "::endgroup::"
+
 echo "::group:: Install bootc base and desktop packages"
 
 # Base packages: the bootc plumbing and filesystem tooling the bootc installer
@@ -54,6 +78,27 @@ apt-get install -y \
     'systemd-boot*' \
     ubuntu-desktop-minimal \
     xfsprogs
+
+echo "::endgroup::"
+
+echo "::group:: Drop crash-dump tooling and restore real tools"
+
+# kdump-tools pairs a crash-dump service with a reserved crash-kernel boot
+# argument (/etc/default/grub.d/kdump-tools.cfg) - not wanted on a
+# daily-driver desktop. Its postinst hook (/etc/kernel/postinst.d/kdump-tools)
+# is exactly what hit the stubbed mkinitramfs above. Purge it while the
+# container-safe stubs are still in place, then restore the real tools. Kernels
+# are held in the next block, so nothing on the booted system runs through
+# mkinitramfs/update-grub automatically anyway.
+if dpkg-query -s kdump-tools >/dev/null 2>&1; then
+    apt-get purge -y kdump-tools
+fi
+if [ -f /usr/sbin/mkinitramfs.real ]; then
+    mv -f /usr/sbin/mkinitramfs.real /usr/sbin/mkinitramfs
+fi
+if [ -f /usr/sbin/update-grub.real ]; then
+    mv -f /usr/sbin/update-grub.real /usr/sbin/update-grub
+fi
 
 echo "::endgroup::"
 
