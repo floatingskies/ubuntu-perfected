@@ -61,8 +61,7 @@ Note: Image signing is disabled by default. Your images will build successfully 
 
 The base image is defined in `Containerfile`:
 ```dockerfile
-ARG BASE_IMAGE=docker.io/library/ubuntu:resolute
-FROM ${BASE_IMAGE} AS system
+FROM docker.io/library/ubuntu:resolute AS base
 ```
 
 Add your packages in `build/10-build.sh`:
@@ -277,9 +276,9 @@ from Fedora and from the old bootcrew-based image:
 > umoci-built images use (see the comment in `shared/build.sh`).
 >
 > **Base pin & updates**: `ubuntu:resolute` floats and can change under you.
-> For reproducible images pin a dated tag at build time:
-> `BASE_IMAGE=docker.io/library/ubuntu:resolute-20260912 just build` (see the
-> Justfile). Kernel updates arrive by rebuilding against a newer base.
+> For reproducible images pin a dated tag by editing the single base line in
+> the `Containerfile` (``FROM docker.io/library/ubuntu:resolute-20260912 AS base``).
+> Kernel updates arrive by rebuilding against a newer base.
 
 Example package installation in `build/10-build.sh`:
 ```bash

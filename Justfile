@@ -94,12 +94,10 @@ build $target_image=image_name $tag=default_tag:
         BUILD_ARGS+=("--build-arg" "SHA_HEAD_SHORT=$(git rev-parse --short HEAD)")
     fi
 
-    # Base image: both stages build FROM docker.io/library/ubuntu:resolute by
-    # default. Pin a dated tag for reproducible builds, e.g.
-    #   BASE_IMAGE=docker.io/library/ubuntu:resolute-20260912 just build
-    if [[ -n "${BASE_IMAGE:-}" ]]; then
-        BUILD_ARGS+=("--build-arg" "BASE_IMAGE=${BASE_IMAGE}")
-    fi
+    # Base image: the Containerfile builds FROM docker.io/library/ubuntu:resolute
+    # (the `FROM ... AS base` line). Pin a dated tag for reproducible builds by
+    # editing that line, e.g. `FROM docker.io/library/ubuntu:resolute-20260912 AS base`.
+    # (Keep it in sync between the two stages - it's a single `AS base` stage.)
 
     podman build \
         "${BUILD_ARGS[@]}" \

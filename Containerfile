@@ -16,12 +16,12 @@ COPY usr /usr
 # Official Canonical Ubuntu 26.04 LTS ("Resolute Raccoon") container image.
 # Canonical rebuilds it regularly, and - unlike the old bootcrew base - it
 # ships its full dpkg/apt state in /var, so package management works natively
-# on the booted system and the file's apt/dpkg state stays coherent with /usr
+# on the booted system and the image's apt/dpkg state stays coherent with /usr
 # by construction (no state reconstruction, no archive snapshot pinning).
 #
-# Pin a dated tag for reproducible builds, e.g.
-#   BASE_IMAGE=docker.io/library/ubuntu:resolute-20260912 just build
-ARG BASE_IMAGE=docker.io/library/ubuntu:resolute
+# To pin a dated tag for reproducible builds, change this ONE line to e.g.
+#   FROM docker.io/library/ubuntu:resolute-20260912 AS base
+FROM docker.io/library/ubuntu:resolute AS base
 
 ###############################################################################
 # Stage 1: compile bootc from upstream source
@@ -31,7 +31,7 @@ ARG BASE_IMAGE=docker.io/library/ubuntu:resolute
 # PAX-format tar headers (https://github.com/composefs/composefs-rs/pull/292)
 # which is required to install Ubuntu 26.04 images built with Canonical's
 # Rockcraft/umoci tooling.
-FROM ${BASE_IMAGE} AS builder
+FROM base AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -51,7 +51,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
 ###############################################################################
 # Stage 2: final system image
 ###############################################################################
-FROM ${BASE_IMAGE} AS system
+FROM base AS system
 
 ARG DEBIAN_FRONTEND=noninteractive
 
