@@ -1,0 +1,17 @@
+# NOTICE
+
+This image build vendors and adapts bootc plumbing scripts from two upstream
+projects released under the Apache License 2.0 (Copyright 2025 tulilirockz):
+
+- `shared/build.sh`, `shared/initramfs.sh` and the base of
+  `shared/bootc-rootfs.sh` derive from
+  https://github.com/jmarrero/ubuntu-bootc (and its ancestor
+  https://github.com/bootcrew/mono).
+- `usr/lib/systemd/system/*.mount` (snap-compatibility bind-mount units)
+  derive from https://github.com/jmarrero/ubuntu-bootc.
+
+`shared/bootc-rootfs.sh` is deliberately modified from upstream: upstream
+deletes `/var` (destroying the dpkg/apt state baked into the official Ubuntu
+base image); this version prunes only volatile data and preserves `/var/lib`.
+
+See the Apache-2.0 license text at https://www.apache.org/licenses/LICENSE-2.0

@@ -21,7 +21,7 @@ A bootc-enabled Ubuntu image with ubuntu-desktop, based on the Universal Blue te
 
 ### Ubuntu Desktop
 - Full ubuntu-desktop package installed
-- Based on ghcr.io/bootcrew/ubuntu-bootc:latest
+- Based on the official Canonical Ubuntu 26.04 LTS image (`ubuntu:resolute`)
 - Bootable container image for Ubuntu
 
 ### Homebrew Integration
@@ -61,7 +61,8 @@ Note: Image signing is disabled by default. Your images will build successfully 
 
 The base image is defined in `Containerfile`:
 ```dockerfile
-FROM ghcr.io/bootcrew/ubuntu-bootc:latest
+ARG BASE_IMAGE=docker.io/library/ubuntu:resolute
+FROM ${BASE_IMAGE} AS system
 ```
 
 Add your packages in `build/10-build.sh`:
@@ -217,7 +218,13 @@ ubuntu-perfected/
 │   │   └── validate-*.yml     # Validation workflows
 │   └── renovate.json5         # Renovate configuration
 ├── build/
-│   └── 10-build.sh            # Install ubuntu-desktop
+│   └── 10-build.sh            # Install bootc base + ubuntu-desktop
+├── shared/                    # Bootc plumbing scripts (vendored upstream)
+│   ├── build.sh               # Compile bootc from source (builder stage)
+│   ├── initramfs.sh           # Generate bootc dracut initramfs
+│   └── bootc-rootfs.sh        # Convert root to bootc/ostree + composefs layout
+├── usr/
+│   └── lib/systemd/system/    # snap-compat bind-mount units (*.mount)
 ├── custom/
 │   ├── brew/                  # Homebrew packages
 │   ├── flatpaks/              # Flatpak applications
@@ -229,50 +236,54 @@ ubuntu-perfected/
 
 ## Ubuntu-Specific Notes
 
-This image is based on Ubuntu bootc, not Fedora. Key differences:
+This image builds **from scratch** on top of the official Canonical Ubuntu
+26.04 LTS container image (`docker.io/library/ubuntu:resolute`), then applies
+the bootc/ostree + composefs plumbing itself (compiled bootc, dracut initramfs
+with the `51bootc` module, `bootc`-compatible root layout). Key differences
+from Fedora and from the old bootcrew-based image:
 
 - **Package Manager**: Uses `apt`/`apt-get` instead of `dnf`
-- **Desktop Environment**: Installs `ubuntu-desktop`
-- **Base Image**: Uses `ghcr.io/bootcrew/ubuntu-bootc:latest`
+- **Desktop Environment**: Installs `ubuntu-desktop-minimal`
+- **Base Image**: `docker.io/library/ubuntu:resolute` (26.04 LTS, rebuilt
+  regularly upstream by Canonical)
 
-> **Package manager state**: The ubuntu-bootc base image ships with an empty
-> `/var` — bootcrew's build wipes it, *including the entire dpkg database* — so
-> apt/dpkg would otherwise have no idea what is installed in `/usr`. This image
-> fixes that in the `Containerfile`:
+> **Package manager state**: Building from the official base means apt/dpkg
+> just work. `ubuntu:resolute` ships its full dpkg database in
+> `/var/lib/dpkg`, and the build (see `build/10-build.sh`) runs completely
+> normal `apt-get` transactions on top of it — `apt-get upgrade` to converge
+> the base to the current archive, then `apt-get install` for the bootc
+> plumbing and the desktop. Nothing is reconstructed or re-pinned, so
+> `apt list --installed`, `apt install` and `apt upgrade` behave exactly like
+> a regular Ubuntu machine, **including on the booted system** (bootc keeps
+> `/var` across deployments). The upstream layout script (`bootc-rootfs.sh`,
+> vendored under `shared/`) is deliberately changed to *not* wipe `/var` —
+> upstream boots delete it, taking the entire dpkg database with it.
 >
-> - An `apt-state` build stage replays bootcrew's own base-build recipe against
->   the Ubuntu archive snapshot matching the base image's `/usr` content
->   (see the `APT_SNAPSHOT` build arg), producing a **byte-accurate dpkg
->   database** for everything already baked into `/usr`.
-> - The main stage imports that database (`COPY --from=apt-state
->   /var/lib/dpkg /var/lib/dpkg`), so `apt list --installed`, `apt upgrade` and
->   `apt install` behave like a regular Ubuntu machine, including on the booted
->   system (bootc's `/var` persists).
-> - Because base packages are recorded as already installed, reinstalling them
->   (e.g. desktop dependencies that overlap the base) is an *upgrade*, and dpkg
->   **preserves the base's conffile customizations** (e.g.
->   `/etc/default/useradd` keeps `HOME=/var/home`).
-> - See `build/10-build.sh`: it recreates `/var/lib/apt/lists/partial`,
->   verifies the imported database matches the baked kernel (fails loudly if
->   `APT_SNAPSHOT` goes stale), **holds all `linux-*` kernel packages** (so apt
->   can never rebuild initramfs without the bootc dracut module and leave the
->   machine unbootable — kernel updates belong in the base image), upgrades the
->   rest of the base to the current archive, then installs
->   `ubuntu-desktop-minimal`.
+> **Kernel safety**: the image boots from the kernel + dracut initramfs baked
+> into `/usr/lib/modules/<kver>/`. All installed `linux-*` packages (minus
+> `linux-firmware`) are **held** so apt can never regenerate an initramfs
+> without the bootc dracut module and leave the machine unbootable. Kernel
+> updates arrive with base-image updates, not through `apt upgrade` on the
+> host. The kernel flavor/version to bake is set by the `linux-image-generic`
+> package in the archive at build time.
 >
-> **Upstream caveat**: the bootcrew base image's `/usr` was built from an
-> archive state of mid-2026 (its `latest` is no longer rebuilt regularly). The
-> `apt-get upgrade` step above converges most of the base to the current
-> archive at build time; anything else can be brought up to date on the booted
-> machine with the usual `sudo apt update && sudo apt upgrade` (kernel packages
-> stay held by design). If the upstream base is rebuilt with a newer `/usr`,
-> bump `APT_SNAPSHOT` to the archive state matching it — the build's coherence
-> check tells you exactly when.
+> **First user**: the image ships with no user accounts, so GDM runs the
+> gnome-initial-setup "create your account" wizard on first boot — a stock
+> Ubuntu Desktop day-one experience (no extra provisioning needed).
+>
+> **Bootc compile**: Ubuntu ships no `bootc` package, so it is compiled from
+> current upstream source in a builder stage. Building from current source is
+> also what provides the composefs fix for the PAX tar headers Canonical's
+> umoci-built images use (see the comment in `shared/build.sh`).
+>
+> **Base pin & updates**: `ubuntu:resolute` floats and can change under you.
+> For reproducible images pin a dated tag at build time:
+> `BASE_IMAGE=docker.io/library/ubuntu:resolute-20260912 just build` (see the
+> Justfile). Kernel updates arrive by rebuilding against a newer base.
 
 Example package installation in `build/10-build.sh`:
 ```bash
 # Ubuntu/Debian
-apt-get update
 apt-get install -y package-name
 
 # vs Fedora
@@ -284,13 +295,15 @@ apt-get install -y package-name
 - [Universal Blue Forums](https://universal-blue.discourse.group/)
 - [Universal Blue Discord](https://discord.gg/WEu6BdFEtp)
 - [bootc Discussion](https://github.com/bootc-dev/bootc/discussions)
-- [Ubuntu bootc Repository](https://github.com/bootcrew/ubuntu-bootc)
+- [bootcrew (Ubuntu bootc experiment)](https://github.com/bootcrew/ubuntu-bootc)
+- [jmarrero/ubuntu-bootc (resolute bootc reference)](https://github.com/jmarrero/ubuntu-bootc)
 
 ## Learn More
 
 - [Universal Blue Documentation](https://universal-blue.org/)
 - [bootc Documentation](https://containers.github.io/bootc/)
-- [Ubuntu bootc Project](https://github.com/bootcrew/ubuntu-bootc)
+- [bootcrew (Ubuntu bootc experiment)](https://github.com/bootcrew/ubuntu-bootc)
+- [jmarrero/ubuntu-bootc (resolute bootc reference)](https://github.com/jmarrero/ubuntu-bootc)
 
 ## Security
 
