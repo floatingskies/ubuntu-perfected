@@ -35,9 +35,12 @@ FROM base AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 
+# libclang-dev + libselinux1-dev are required to compile bootc's selinux-sys
+# dependency (bindgen generates the C bindings against libclang and the
+# selinux headers).
 RUN --mount=type=tmpfs,dst=/tmp --mount=type=tmpfs,dst=/root --mount=type=tmpfs,dst=/boot \
     apt-get update -y && \
-    apt-get install -y git curl make build-essential go-md2man libzstd-dev pkgconf libostree-dev ostree
+    apt-get install -y git curl make build-essential go-md2man libzstd-dev pkgconf libostree-dev ostree libclang-dev libselinux1-dev
 
 ENV CARGO_HOME=/tmp/rust \
     RUSTUP_HOME=/tmp/rust

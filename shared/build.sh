@@ -13,4 +13,10 @@ set -xeuo pipefail
 # Upstream: jmarrero/ubuntu-bootc shared/build.sh (Apache-2.0, (c) tulilirockz)
 git clone "https://github.com/bootc-dev/bootc.git" .
 
+# bootc depends on selinux-sys, which generates C bindings with bindgen.
+# bindgen needs libclang at build time (installed in the builder stage via
+# libclang-dev); point it at the system library so auto-detection can't miss.
+LIBCLANG_PATH="$(find /usr/lib -path '*/lib/libclang.so*' | head -n 1 | xargs dirname)"
+export LIBCLANG_PATH
+
 make bin install-all DESTDIR=/output
