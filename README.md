@@ -270,6 +270,23 @@ from Fedora and from the old bootcrew-based image:
 > gnome-initial-setup "create your account" wizard on first boot — a stock
 > Ubuntu Desktop day-one experience (no extra provisioning needed).
 >
+> **Kernel-first install order**: installing a kernel runs every
+> `/etc/kernel/postinst.d/` hook, and two hooks from the desktop stack cannot
+> run inside a build container: `kdump-tools`'s hook calls `mkinitramfs` with a
+> kdump-specific config and dies with `mkinitramfs: failed to determine device
+> for /` (which aborts the whole `apt-get` transaction), and grub's
+> `zz-update-grub` runs `update-grub` (device probing, also container-hostile).
+> `build/10-build.sh` therefore installs the kernel (`linux-image-generic` +
+> `dracut`) **before** the desktop stack exists, so only dracut's hook runs
+> (safe in-container — with dracut installed, `update-initramfs` fronts to
+> dracut, which doesn't probe the root device). The desktop transaction then
+> only *configures* initramfs-tools/kdump-tools/grub — their configure-time
+> postinsts are container-safe and no kernel is configured then, so the hostile
+> hooks never run. `kdump-tools` (an unused crash-dump service with a reserved
+> `crashkernel=` boot argument) is purged afterwards. Maintain this ordering —
+> moving the kernel install after the desktop reintroduces the container
+> failure.
+>
 > **Bootc compile**: Ubuntu ships no `bootc` package, so it is compiled from
 > current upstream source in a builder stage. Building from current source is
 > also what provides the composefs fix for the PAX tar headers Canonical's

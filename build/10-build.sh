@@ -25,35 +25,36 @@ apt-get upgrade -y \
 
 echo "::endgroup::"
 
-echo "::group:: Prepare initramfs and bootloader tooling"
+echo "::group:: Install kernel first (before desktop hooks exist)"
 
-# The desktop stack pulls initramfs-tools (via kdump-tools) and the grub
-# packages, and configuring a kernel runs their hooks (mkinitramfs for the
-# kdump initrd, update-grub for grub.cfg). Inside a build container those fail:
-#   mkinitramfs: failed to determine device for /
-#   dpkg: error processing package linux-image-... postinst ... exit status 1
-# Extract the pieces that only FAIL interactively: install the tool-owning
-# packages now, while no kernel/modules exist (their postinsts have nothing to
-# regenerate), then stub the binaries out for the rest of the build. The real
-# bootc initramfs is generated later with dracut (initramfs.sh), and the real
-# tools are restored once the desktop install is done.
-apt-get install -y initramfs-tools grub-common grub2-common
-
-mv /usr/sbin/mkinitramfs /usr/sbin/mkinitramfs.real
-printf '#!/bin/sh\nexit 0\n' > /usr/sbin/mkinitramfs
-chmod +x /usr/sbin/mkinitramfs
-
-mv /usr/sbin/update-grub /usr/sbin/update-grub.real
-printf '#!/bin/sh\nexit 0\n' > /usr/sbin/update-grub
-chmod +x /usr/sbin/update-grub
+# The kernel is installed BEFORE the desktop stack on purpose. Configuring a
+# linux-image package runs every /etc/kernel/postinst.d/ hook, and the desktop
+# stack later pulls hooks that cannot run inside a build container:
+#   - kdump-tools' hook calls mkinitramfs with a kdump-specific config and dies
+#     with "mkinitramfs: failed to determine device for /", aborting the whole
+#     apt transaction (dpkg: error processing package linux-image-...
+#     postinst exit status 1)
+#   - grub's zz-update-grub runs update-grub (device probing, also
+#     container-hostile)
+# When the kernel is configured first, the only hook present is dracut's, which
+# works fine in a container (update-initramfs fronts to dracut when it is
+# installed, and the dracut hook regenerates /boot/initrd.img without device
+# probing). The desktop transaction later CONFIGURES initramfs-tools/
+# kdump-tools/grub, but their configure-time postinsts are container-safe and
+# no kernel package is configured then, so the hostile hooks never run.
+apt-get install -y \
+    -o Dpkg::Options::=--force-confold \
+    -o Dpkg::Options::=--force-confdef \
+    dracut \
+    linux-firmware \
+    linux-image-generic
 
 echo "::endgroup::"
 
 echo "::group:: Install bootc base and desktop packages"
 
 # Base packages: the bootc plumbing and filesystem tooling the bootc installer
-# needs. Ubuntu 26.04 uses dracut for the initramfs (linux-image Recommends
-# `dracut | linux-initramfs-tool`).
+# needs. Ubuntu 26.04 uses dracut for the initramfs (see kernel step above).
 #
 # Desktop: ubuntu-desktop-minimal installed WITH its Recommends (the default),
 # so you get exactly what a stock Ubuntu Desktop talks to - gnome-initial-setup
@@ -63,13 +64,10 @@ apt-get install -y \
     -o Dpkg::Options::=--force-confdef \
     btrfs-progs \
     dosfstools \
-    dracut \
     e2fsprogs \
     fdisk \
     gnome-initial-setup \
     libostree-dev \
-    linux-firmware \
-    linux-image-generic \
     openssh-server \
     ostree \
     skopeo \
@@ -81,23 +79,16 @@ apt-get install -y \
 
 echo "::endgroup::"
 
-echo "::group:: Drop crash-dump tooling and restore real tools"
+echo "::group:: Drop crash-dump tooling"
 
 # kdump-tools pairs a crash-dump service with a reserved crash-kernel boot
 # argument (/etc/default/grub.d/kdump-tools.cfg) - not wanted on a
-# daily-driver desktop. Its postinst hook (/etc/kernel/postinst.d/kdump-tools)
-# is exactly what hit the stubbed mkinitramfs above. Purge it while the
-# container-safe stubs are still in place, then restore the real tools. Kernels
-# are held in the next block, so nothing on the booted system runs through
-# mkinitramfs/update-grub automatically anyway.
+# daily-driver desktop. Purging also removes its /etc/kernel/postinst.d/
+# hook, so a future manual kernel install won't regenerate a kdump initrd
+# (kernels are held anyway, see next block). Its postrm touches no initramfs
+# machinery, so this is clean.
 if dpkg-query -s kdump-tools >/dev/null 2>&1; then
     apt-get purge -y kdump-tools
-fi
-if [ -f /usr/sbin/mkinitramfs.real ]; then
-    mv -f /usr/sbin/mkinitramfs.real /usr/sbin/mkinitramfs
-fi
-if [ -f /usr/sbin/update-grub.real ]; then
-    mv -f /usr/sbin/update-grub.real /usr/sbin/update-grub
 fi
 
 echo "::endgroup::"
