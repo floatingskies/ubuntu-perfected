@@ -94,6 +94,14 @@ build $target_image=image_name $tag=default_tag:
         BUILD_ARGS+=("--build-arg" "SHA_HEAD_SHORT=$(git rev-parse --short HEAD)")
     fi
 
+    # By default the Containerfile pins APT_SNAPSHOT to the archive snapshot
+    # matching the bootcrew base image's /usr (see the apt-state stage docs).
+    # Override it (e.g. after the upstream base is rebuilt) with:
+    #   APT_SNAPSHOT=20260902T000000Z just build
+    if [[ -n "${APT_SNAPSHOT:-}" ]]; then
+        BUILD_ARGS+=("--build-arg" "APT_SNAPSHOT=${APT_SNAPSHOT}")
+    fi
+
     podman build \
         "${BUILD_ARGS[@]}" \
         --pull=newer \

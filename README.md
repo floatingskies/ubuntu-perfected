@@ -235,6 +235,40 @@ This image is based on Ubuntu bootc, not Fedora. Key differences:
 - **Desktop Environment**: Installs `ubuntu-desktop`
 - **Base Image**: Uses `ghcr.io/bootcrew/ubuntu-bootc:latest`
 
+> **Package manager state**: The ubuntu-bootc base image ships with an empty
+> `/var` — bootcrew's build wipes it, *including the entire dpkg database* — so
+> apt/dpkg would otherwise have no idea what is installed in `/usr`. This image
+> fixes that in the `Containerfile`:
+>
+> - An `apt-state` build stage replays bootcrew's own base-build recipe against
+>   the Ubuntu archive snapshot matching the base image's `/usr` content
+>   (see the `APT_SNAPSHOT` build arg), producing a **byte-accurate dpkg
+>   database** for everything already baked into `/usr`.
+> - The main stage imports that database (`COPY --from=apt-state
+>   /var/lib/dpkg /var/lib/dpkg`), so `apt list --installed`, `apt upgrade` and
+>   `apt install` behave like a regular Ubuntu machine, including on the booted
+>   system (bootc's `/var` persists).
+> - Because base packages are recorded as already installed, reinstalling them
+>   (e.g. desktop dependencies that overlap the base) is an *upgrade*, and dpkg
+>   **preserves the base's conffile customizations** (e.g.
+>   `/etc/default/useradd` keeps `HOME=/var/home`).
+> - See `build/10-build.sh`: it recreates `/var/lib/apt/lists/partial`,
+>   verifies the imported database matches the baked kernel (fails loudly if
+>   `APT_SNAPSHOT` goes stale), **holds all `linux-*` kernel packages** (so apt
+>   can never rebuild initramfs without the bootc dracut module and leave the
+>   machine unbootable — kernel updates belong in the base image), upgrades the
+>   rest of the base to the current archive, then installs
+>   `ubuntu-desktop-minimal`.
+>
+> **Upstream caveat**: the bootcrew base image's `/usr` was built from an
+> archive state of mid-2026 (its `latest` is no longer rebuilt regularly). The
+> `apt-get upgrade` step above converges most of the base to the current
+> archive at build time; anything else can be brought up to date on the booted
+> machine with the usual `sudo apt update && sudo apt upgrade` (kernel packages
+> stay held by design). If the upstream base is rebuilt with a newer `/usr`,
+> bump `APT_SNAPSHOT` to the archive state matching it — the build's coherence
+> check tells you exactly when.
+
 Example package installation in `build/10-build.sh`:
 ```bash
 # Ubuntu/Debian
